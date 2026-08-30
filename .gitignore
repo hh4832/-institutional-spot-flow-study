@@ -1,0 +1,11 @@
+.env
+*.pfx
+service_account.json
+credentials.json
+outputs/
+outputs_synthetic/
+smoke_outputs/
+__pycache__/
+.pytest_cache/
+.ipynb_checkpoints/
+*.pyc
