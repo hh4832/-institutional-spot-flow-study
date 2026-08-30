@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from statistics import summarize_group
+from study_statistics import summarize_group
 
 
 def test_hac_summary_has_expected_mean_difference():
