@@ -21,7 +21,7 @@ from reporting import (
     write_research_summary,
 )
 from returns import build_forward_returns
-from statistics import (
+from study_statistics import (
     add_fdr_columns,
     continuous_hac_regression,
     summarize_group,
