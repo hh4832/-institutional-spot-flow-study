@@ -9,8 +9,7 @@ class StudyConfig:
     ticker: str = "0050"
     accumulation_windows: tuple[int, ...] = (1, 5, 10)
     return_horizons: tuple[int, ...] = (1, 2, 3, 5, 10)
-    rolling_window: int = 252
-    rolling_min_periods: int = 252
+    normalization_windows: tuple[int, ...] = (252, 504, 756)
     primary_horizons: tuple[int, ...] = (1, 5)
     primary_flow_type: str = "net"
     primary_institutions: tuple[str, ...] = (

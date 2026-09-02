@@ -193,6 +193,8 @@ def add_fdr_columns(
             "flow_type",
             "accumulation_window",
             "normalization_type",
+            "normalization_window",
+            "sample_type",
             "return_type",
         ]
         if column in result.columns

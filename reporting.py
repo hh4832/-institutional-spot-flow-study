@@ -49,7 +49,7 @@ def build_manifest(config: dict, metadata: dict) -> dict:
             ]
         },
         "git_commit_hash": _git_commit(),
-        "study_version": "0.1.0",
+        "study_version": "0.2.0",
         "config": config,
         **metadata,
     }

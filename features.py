@@ -124,20 +124,27 @@ def rolling_zscore(
 
 def add_normalizations(
     predictors: pd.DataFrame,
-    window: int = 252,
-    min_periods: int = 252,
+    windows: tuple[int, ...] = (252, 504, 756),
     include_global: bool = True,
 ) -> pd.DataFrame:
+    if not windows:
+        raise ValueError("標準化視窗不可為空")
+    if any(window <= 1 for window in windows):
+        raise ValueError("標準化視窗必須大於 1")
+    if len(set(windows)) != len(windows):
+        raise ValueError("標準化視窗不可重複")
+
     output: dict[str, pd.Series] = {}
     for name in predictors.columns:
         series = predictors[name]
         output[f"{name}__raw"] = series
-        output[f"{name}__rolling_pr"] = rolling_percentile_rank(
-            series, window, min_periods
-        )
-        output[f"{name}__rolling_z"] = rolling_zscore(
-            series, window, min_periods
-        )
+        for window in windows:
+            output[f"{name}__rolling_{window}d_pr"] = rolling_percentile_rank(
+                series, window, window
+            )
+            output[f"{name}__rolling_{window}d_z"] = rolling_zscore(
+                series, window, window
+            )
         if include_global:
             output[f"{name}__global_pr"] = series.rank(
                 method="average", pct=True

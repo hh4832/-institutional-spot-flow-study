@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import numpy as np
@@ -30,17 +31,9 @@ from validation import quality_report_markdown, validate_raw_data
 
 
 def _parse_predictor_name(column: str) -> dict:
-    base = column
-    for suffix in (
-        "__rolling_pr",
-        "__rolling_z",
-        "__global_pr",
-        "__global_z",
-        "__raw",
-    ):
-        if base.endswith(suffix):
-            base = base[: -len(suffix)]
-            break
+    base = re.sub(
+        r"__(?:rolling_\d+d_(?:pr|z)|global_(?:pr|z)|raw)$", "", column
+    )
     scope, institution, flow_type, accumulation = base.split("__")
     return {
         "predictor": base,
@@ -92,6 +85,7 @@ def _analysis_level(meta: dict, normalization: str, return_meta: dict) -> str:
 def _group_results(
     normalized: pd.DataFrame,
     returns: pd.DataFrame,
+    sample_type: str,
 ) -> pd.DataFrame:
     rows: list[dict] = []
     predictor_columns = [
@@ -105,7 +99,7 @@ def _group_results(
     total_steps = len(predictor_columns) * len(return_columns)
     with tqdm(total=total_steps, desc="[7/8] 執行分組統計", leave=False) as progress:
         for predictor_column in predictor_columns:
-            normalization, group_method, lookahead = normalization_metadata(
+            normalization, group_method, lookahead, normalization_window = normalization_metadata(
                 predictor_column
             )
             values = normalized[predictor_column]
@@ -134,6 +128,8 @@ def _group_results(
                             "analysis_type": "group",
                             **predictor_meta,
                             "normalization_type": normalization,
+                            "normalization_window": normalization_window,
+                            "sample_type": sample_type,
                             "group_method": group_method,
                             "group": label,
                             "lookahead_descriptive_only": lookahead,
@@ -153,6 +149,7 @@ def _group_results(
 def _continuous_results(
     normalized: pd.DataFrame,
     returns: pd.DataFrame,
+    sample_type: str,
 ) -> pd.DataFrame:
     rows: list[dict] = []
     predictor_columns = list(normalized.columns)
@@ -162,7 +159,9 @@ def _continuous_results(
     for predictor_column in tqdm(
         predictor_columns, desc="[7/8] 執行連續變數迴歸", leave=False
     ):
-        normalization, _, lookahead = normalization_metadata(predictor_column)
+        normalization, _, lookahead, normalization_window = normalization_metadata(
+            predictor_column
+        )
         predictor_meta = _parse_predictor_name(predictor_column)
         for return_column in return_columns:
             return_meta = _return_metadata(return_column)
@@ -176,6 +175,8 @@ def _continuous_results(
                     {
                         **predictor_meta,
                         "normalization_type": normalization,
+                        "normalization_window": normalization_window,
+                        "sample_type": sample_type,
                         "lookahead_descriptive_only": lookahead,
                         "return_column": return_column,
                         **return_meta,
@@ -210,11 +211,13 @@ def _annual_breakdown(
         for column in normalized.columns
         if column.startswith("combined__")
         and "__net__" in column
-        and column.endswith(("__rolling_pr", "__rolling_z"))
+        and re.search(r"__rolling_\d+d_(?:pr|z)$", column)
     ]
     rows: list[dict] = []
     for predictor_column in primary:
-        normalization, method, _ = normalization_metadata(predictor_column)
+        normalization, method, _, normalization_window = normalization_metadata(
+            predictor_column
+        )
         groups = (
             assign_pr_group(normalized[predictor_column])
             if method == "pr"
@@ -239,6 +242,8 @@ def _annual_breakdown(
             meta = _parse_predictor_name(predictor_column)
             summary["predictor"] = meta["predictor"]
             summary["normalization_type"] = normalization
+            summary["normalization_window"] = normalization_window
+            summary["sample_type"] = "full_available"
             summary["return_column"] = return_column
             rows.extend(summary.to_dict("records"))
     return pd.DataFrame(rows)
@@ -259,10 +264,12 @@ def _subperiod_breakdown(
         for column in normalized.columns
         if column.startswith("combined__")
         and "__net__" in column
-        and column.endswith(("__rolling_pr", "__rolling_z"))
+        and re.search(r"__rolling_\d+d_(?:pr|z)$", column)
     ]
     for predictor_column in columns:
-        normalization, method, _ = normalization_metadata(predictor_column)
+        normalization, method, _, normalization_window = normalization_metadata(
+            predictor_column
+        )
         groups = (
             assign_pr_group(normalized[predictor_column])
             if method == "pr"
@@ -289,6 +296,8 @@ def _subperiod_breakdown(
                 summary["period"] = period
                 summary["predictor"] = meta["predictor"]
                 summary["normalization_type"] = normalization
+                summary["normalization_window"] = normalization_window
+                summary["sample_type"] = "full_available"
                 summary["return_column"] = return_column
                 rows.extend(summary.to_dict("records"))
     return pd.DataFrame(rows)
@@ -303,35 +312,40 @@ def _generate_primary_figures(
 
     primary = group_results.loc[group_results["analysis_level"].eq("primary")]
     for institution in ("foreign", "investment_trust", "dealer"):
-        subset = primary.loc[
+        institution_subset = primary.loc[
             primary["institution"].eq(institution)
             & primary["accumulation_window"].eq(1)
             & primary["normalization_type"].eq("rolling_pr")
             & primary["return_type"].eq("O1_to_C1")
+            & primary["sample_type"].eq("common_window_start")
         ].copy()
-        if subset.empty:
-            continue
-        subset = subset.sort_values("group")
-        error_low = subset["mean_return"] - subset["zero_ci_low"]
-        error_high = subset["zero_ci_high"] - subset["mean_return"]
-        fig, ax = plt.subplots(figsize=(10, 5))
-        ax.errorbar(
-            subset["group"].astype(str),
-            subset["mean_return"] * 100,
-            yerr=np.vstack([error_low, error_high]) * 100,
-            fmt="o-",
-            capsize=3,
-        )
-        ax.axhline(0, color="black", linewidth=0.8)
-        ax.set_title(f"{institution} Net 1d rolling PR: O1 to C1")
-        ax.set_ylabel("Mean return (%) with HAC 95% CI")
-        ax.tick_params(axis="x", rotation=35)
-        fig.tight_layout()
-        fig.savefig(
-            figure_dir / f"combined_{institution}_net_1d_rolling_pr_O1_C1.png",
-            dpi=150,
-        )
-        plt.close(fig)
+        for window, subset in institution_subset.groupby(
+            "normalization_window", dropna=True
+        ):
+            subset = subset.sort_values("group")
+            error_low = subset["mean_return"] - subset["zero_ci_low"]
+            error_high = subset["zero_ci_high"] - subset["mean_return"]
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.errorbar(
+                subset["group"].astype(str),
+                subset["mean_return"] * 100,
+                yerr=np.vstack([error_low, error_high]) * 100,
+                fmt="o-",
+                capsize=3,
+            )
+            ax.axhline(0, color="black", linewidth=0.8)
+            ax.set_title(
+                f"{institution} Net 1d rolling {int(window)}d PR: O1 to C1"
+            )
+            ax.set_ylabel("Mean return (%) with HAC 95% CI")
+            ax.tick_params(axis="x", rotation=35)
+            fig.tight_layout()
+            fig.savefig(
+                figure_dir
+                / f"combined_{institution}_net_1d_rolling_{int(window)}d_pr_O1_C1.png",
+                dpi=150,
+            )
+            plt.close(fig)
 
     correlation_columns = [
         column
@@ -352,6 +366,62 @@ def _generate_primary_figures(
         fig.tight_layout()
         fig.savefig(figure_dir / "combined_net_predictor_spearman_correlation.png", dpi=150)
         plt.close(fig)
+
+
+def _normalization_columns_for_window(
+    normalized: pd.DataFrame, window: int
+) -> list[str]:
+    pattern = re.compile(rf"__rolling_{window}d_(?:pr|z)$")
+    return [column for column in normalized.columns if pattern.search(column)]
+
+
+def _sample_availability(
+    normalized: pd.DataFrame, windows: tuple[int, ...]
+) -> tuple[pd.DataFrame, pd.Timestamp]:
+    rows: list[dict] = []
+    all_ready_starts: list[pd.Timestamp] = []
+    for window in windows:
+        columns = _normalization_columns_for_window(normalized, window)
+        first_valid_dates = [normalized[column].first_valid_index() for column in columns]
+        if not columns or any(date is None for date in first_valid_dates):
+            start = pd.NaT
+            end = pd.NaT
+            count = 0
+        else:
+            start = min(first_valid_dates)
+            all_predictors_ready_start = max(first_valid_dates)
+            end = normalized.index.max()
+            count = int((normalized.index >= start).sum())
+            all_ready_starts.append(all_predictors_ready_start)
+        rows.append(
+            {
+                "sample_type": "full_available",
+                "normalization_window": window,
+                "sample_start": start,
+                "all_predictors_ready_start": (
+                    all_predictors_ready_start if count else pd.NaT
+                ),
+                "sample_end": end,
+                "available_date_count": count,
+            }
+        )
+    if len(all_ready_starts) != len(windows):
+        raise ValueError("至少一個標準化視窗沒有任何可用樣本")
+    # The common comparison begins only after every 1/5/10-day predictor has
+    # completed the longest window's warm-up.
+    common_start = max(all_ready_starts)
+    common_count = int((normalized.index >= common_start).sum())
+    rows.append(
+        {
+            "sample_type": "common_window_start",
+            "normalization_window": max(windows),
+            "sample_start": common_start,
+            "all_predictors_ready_start": common_start,
+            "sample_end": normalized.index.max(),
+            "available_date_count": common_count,
+        }
+    )
+    return pd.DataFrame(rows), common_start
 
 
 def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
@@ -387,14 +457,34 @@ def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
     print("[6/8] 計算 PR 與 Z-score")
     normalized = add_normalizations(
         predictors,
-        window=config.rolling_window,
-        min_periods=config.rolling_min_periods,
+        windows=config.normalization_windows,
         include_global=config.include_global_normalization,
     )
     analysis_dataset = pd.concat([predictors, normalized, returns], axis=1)
+    sample_availability, common_start = _sample_availability(
+        normalized, config.normalization_windows
+    )
+    common_normalized = normalized.loc[normalized.index >= common_start]
+    common_returns = returns.loc[returns.index >= common_start]
 
-    group_results = _group_results(normalized, returns)
-    continuous_results = _continuous_results(normalized, returns)
+    group_results = pd.concat(
+        [
+            _group_results(normalized, returns, "full_available"),
+            _group_results(
+                common_normalized, common_returns, "common_window_start"
+            ),
+        ],
+        ignore_index=True,
+    )
+    continuous_results = pd.concat(
+        [
+            _continuous_results(normalized, returns, "full_available"),
+            _continuous_results(
+                common_normalized, common_returns, "common_window_start"
+            ),
+        ],
+        ignore_index=True,
+    )
     annual = _annual_breakdown(normalized, returns)
     subperiod = _subperiod_breakdown(normalized, returns)
 
@@ -402,6 +492,25 @@ def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
     output = timestamped_output_directory(config.output_root)
     analysis_dataset.to_parquet(output / "analysis_dataset.parquet")
     predictors.to_parquet(output / "predictor_dataset.parquet")
+    for window in config.normalization_windows:
+        window_columns = _normalization_columns_for_window(normalized, window)
+        window_data = pd.concat(
+            [predictors, normalized[window_columns], returns], axis=1
+        )
+        window_start = sample_availability.loc[
+            sample_availability["sample_type"].eq("full_available")
+            & sample_availability["normalization_window"].eq(window),
+            "sample_start",
+        ].iloc[0]
+        window_data.loc[window_data.index >= window_start].to_parquet(
+            output / f"analysis_dataset_rolling_{window}d_full.parquet"
+        )
+    analysis_dataset.loc[analysis_dataset.index >= common_start].to_parquet(
+        output / "analysis_dataset_common_window_start.parquet"
+    )
+    sample_availability.to_csv(
+        output / "sample_availability.csv", index=False
+    )
     group_results.to_csv(output / "group_statistics.csv", index=False)
     continuous_results.to_csv(output / "continuous_regression.csv", index=False)
     annual.to_csv(output / "annual_breakdown.csv", index=False)
@@ -415,7 +524,8 @@ def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
         pd.DataFrame(
             {
                 "說明": [
-                    "rolling 252 日為主要分析；global PR/Z 僅供描述性對照。",
+                    "rolling 252／504／756 日並列分析；global PR/Z 僅供描述性對照。",
+                    "full_available 使用各視窗全部可用日期；common_window_start 使用共同起點。",
                     "C0→O1 不可由 d0 盤後訊號交易；O1→Ch 才是可交易報酬。",
                 ]
             }
@@ -435,6 +545,9 @@ def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
         annual.to_excel(writer, sheet_name="Annual_Breakdown", index=False)
         subperiod.to_excel(writer, sheet_name="Subperiod_Breakdown", index=False)
         quality.to_excel(writer, sheet_name="Data_Quality", index=False)
+        sample_availability.to_excel(
+            writer, sheet_name="Sample_Availability", index=False
+        )
         fdr_columns = [
             column
             for column in group_results.columns
@@ -462,6 +575,8 @@ def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
         "price_dataset_names": raw.price_dataset_names,
         "hac_lag_rule": "max(horizon - 1, 0)",
         "global_normalization_warning": "lookahead_descriptive_only",
+        "common_sample_start": str(common_start),
+        "sample_types": ["full_available", "common_window_start"],
     }
     write_json(output / "run_manifest.json", build_manifest(config.to_dict(), metadata))
     write_json(output / "config_snapshot.json", config.to_dict())

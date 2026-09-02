@@ -12,8 +12,7 @@ if __name__ == "__main__":
     config = StudyConfig(
         accumulation_windows=(1, 5, 10),
         return_horizons=(1, 2, 3, 5, 10),
-        rolling_window=60,
-        rolling_min_periods=60,
+        normalization_windows=(60, 120, 180),
         include_global_normalization=True,
         output_root=Path("outputs_synthetic"),
     )

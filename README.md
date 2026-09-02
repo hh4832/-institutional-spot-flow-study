@@ -8,7 +8,9 @@
 - 市場範圍：上市、上櫃及上市＋上櫃，分子與分母嚴格配對。
 - 隔夜報酬：`C0→O1`，僅供統計解釋。
 - 可交易報酬：`O1→C1/C2/C3/C5/C10`。
-- 主要正規化：只使用 d0 及以前資料的 252 日 rolling PR 與 Z-score。
+- 主要正規化：只使用 d0 及以前資料的 252／504／756 日 rolling PR 與 Z-score。
+- 標準化輸出欄位明確標示視窗，例如 `rolling_252d_pr`、`rolling_504d_z`。
+- 同時輸出各視窗完整可用樣本，以及自 756 日視窗可用日起算的共同樣本。
 - Global PR/Z：標記為 `lookahead_descriptive_only`，不得解釋為歷史即時訊號。
 - 推論：Newey–West HAC；多日報酬使用 `maxlags=horizon-1`。
 - 價格：收盤使用 `etl:adj_close`；若 `etl:adj_open` 不存在，開盤使用
@@ -64,3 +66,16 @@ Notebook 流程：GitHub clone／安全更新、安裝套件、測試、FinLab �
 - 不計算 CAGR 或策略 Sharpe ratio。
 - 不把重疊 forward returns 視為獨立交易。
 - 統計顯著不等於具有經濟意義或可交易性。
+
+## 多滾動視窗輸出
+
+- `analysis_dataset_rolling_252d_full.parquet`
+- `analysis_dataset_rolling_504d_full.parquet`
+- `analysis_dataset_rolling_756d_full.parquet`
+- `analysis_dataset_common_window_start.parquet`
+- `sample_availability.csv`
+
+`full_available` 保留各標準化視窗本身所有可用日期，各 Predictor 依其
+1／5／10 日累積期間完成暖機；`common_window_start` 則固定由最長的
+756 日視窗下所有 Predictor 都完成暖機之日算起，
+用來避免不同視窗因樣本起點不同而產生不公平比較。

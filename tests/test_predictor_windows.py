@@ -38,9 +38,31 @@ def test_rolling_normalization_does_not_change_past_when_future_added():
         windows=(1,),
     )
     short = add_normalizations(
-        predictors.iloc[:30], window=10, min_periods=10, include_global=False
+        predictors.iloc[:30], windows=(10,), include_global=False
     )
     full = add_normalizations(
-        predictors, window=10, min_periods=10, include_global=False
+        predictors, windows=(10,), include_global=False
     )
     assert np.allclose(short.to_numpy(), full.loc[short.index].to_numpy(), equal_nan=True)
+
+
+def test_multiple_normalization_windows_are_named_and_aligned():
+    raw = make_synthetic_raw_data(periods=40)
+    turnover = build_turnover(raw.market_amount)
+    predictors = build_flow_predictors(
+        raw.institutional_buy,
+        raw.institutional_sell,
+        raw.institutional_net,
+        turnover,
+        windows=(1,),
+    )
+    normalized = add_normalizations(
+        predictors[["combined__foreign__net__1d"]],
+        windows=(10, 20, 30),
+        include_global=False,
+    )
+    assert "combined__foreign__net__1d__rolling_10d_pr" in normalized
+    assert "combined__foreign__net__1d__rolling_20d_z" in normalized
+    assert "combined__foreign__net__1d__rolling_30d_pr" in normalized
+    assert normalized["combined__foreign__net__1d__rolling_10d_z"].first_valid_index() == predictors.index[9]
+    assert normalized["combined__foreign__net__1d__rolling_30d_z"].first_valid_index() == predictors.index[29]

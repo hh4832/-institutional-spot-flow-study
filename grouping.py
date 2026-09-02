@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 from config import PR_BINS, PR_LABELS, Z_BINS, Z_LABELS
@@ -25,13 +27,14 @@ def assign_z_group(values: pd.Series) -> pd.Series:
     )
 
 
-def normalization_metadata(column_name: str) -> tuple[str, str, bool]:
-    if column_name.endswith("__rolling_pr"):
-        return "rolling_pr", "pr", False
-    if column_name.endswith("__rolling_z"):
-        return "rolling_z", "z", False
+def normalization_metadata(column_name: str) -> tuple[str, str, bool, int | None]:
+    rolling = re.search(r"__rolling_(\d+)d_(pr|z)$", column_name)
+    if rolling:
+        return f"rolling_{rolling.group(2)}", rolling.group(2), False, int(
+            rolling.group(1)
+        )
     if column_name.endswith("__global_pr"):
-        return "global_pr", "pr", True
+        return "global_pr", "pr", True, None
     if column_name.endswith("__global_z"):
-        return "global_z", "z", True
-    return "raw", "none", False
+        return "global_z", "z", True, None
+    return "raw", "none", False, None
