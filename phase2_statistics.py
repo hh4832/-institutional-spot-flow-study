@@ -67,6 +67,7 @@ def nonlinear_hac_regressions(
     linear = _fit(frame["return"], linear_x, maxlags)
     rows = [{
         "model_type": "linear",
+        "shape_flag": "monotonic_linear_candidate",
         "observation_count": len(frame),
         "linear_beta": float(linear.params["linear"]),
         "quadratic_beta": np.nan,
@@ -85,6 +86,11 @@ def nonlinear_hac_regressions(
     quadratic = _fit(frame["return"], quadratic_x, maxlags)
     rows.append({
         "model_type": "quadratic",
+        "shape_flag": (
+            "u_shaped" if quadratic.params["quadratic"] > 0 and quadratic.pvalues["quadratic"] < 0.05
+            else "inverted_u_shaped" if quadratic.params["quadratic"] < 0 and quadratic.pvalues["quadratic"] < 0.05
+            else "no_quadratic_evidence"
+        ),
         "observation_count": len(frame),
         "linear_beta": float(quadratic.params["linear"]),
         "quadratic_beta": float(quadratic.params["quadratic"]),
@@ -109,6 +115,7 @@ def nonlinear_hac_regressions(
     joint = spline_result.wald_test(restriction, scalar=True)
     rows.append({
         "model_type": "restricted_cubic_spline",
+        "shape_flag": "spline_joint_test",
         "observation_count": len(frame),
         "linear_beta": np.nan,
         "quadratic_beta": np.nan,
