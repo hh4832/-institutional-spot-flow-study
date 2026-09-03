@@ -337,7 +337,41 @@ def _temporal_breakdowns(candidates: list[dict], returns: pd.DataFrame) -> tuple
                 "observation_count": len(values), "mean_return": values.mean(),
                 "positive_rate": values.gt(0).mean() if len(values) else np.nan,
             })
-    return pd.DataFrame(period_rows), pd.DataFrame(loo_rows)
+    periods_frame = pd.DataFrame(period_rows)
+    if not periods_frame.empty:
+        for candidate_id, indices in periods_frame.groupby("candidate_id").groups.items():
+            subset = periods_frame.loc[indices].dropna(subset=["mean_return"])
+            signs = np.sign(subset["mean_return"])
+            unstable = bool((signs.gt(0).any()) and (signs.lt(0).any()))
+            contribution = (subset["mean_return"].abs() * subset["observation_count"]).fillna(0)
+            dominated = bool(
+                contribution.sum() > 0 and contribution.max() / contribution.sum() > 0.5
+            )
+            periods_frame.loc[indices, "direction_flip_across_periods"] = unstable
+            periods_frame.loc[indices, "single_period_dominated"] = dominated
+    return periods_frame, pd.DataFrame(loo_rows)
+
+
+def _signal_comparison(distribution_results: pd.DataFrame) -> pd.DataFrame:
+    if distribution_results.empty:
+        return distribution_results.copy()
+    index = ["predictor", "normalization_type", "group", "return_type"]
+    values = ["observation_count", "mean_return", "positive_rate", "cohens_d", "fdr_global"]
+    comparison = distribution_results.pivot_table(
+        index=index,
+        columns="requested_normalization_window",
+        values=values,
+        aggfunc="first",
+    )
+    comparison.columns = [f"{metric}_rolling_{int(window)}d" for metric, window in comparison.columns]
+    comparison = comparison.reset_index()
+    mean_columns = [c for c in comparison if c.startswith("mean_return_rolling_")]
+    if len(mean_columns) >= 2:
+        signs = np.sign(comparison[mean_columns])
+        comparison["direction_consistent_across_windows"] = signs.apply(
+            lambda row: row.dropna().nunique() <= 1, axis=1
+        )
+    return comparison
 
 
 def _market_regime_breakdown(
@@ -421,6 +455,16 @@ def _data_regime_audit(raw: RawData) -> pd.DataFrame:
                 "missing_count": int(series.isna().sum()),
                 "dealer_definition_regime": regimes["dealer_definition_regime"],
                 "foreign_definition_regime": regimes["foreign_definition_regime"],
+                "recommended_source": (
+                    "上市外資及陸資(不含外資自營商)"
+                    if column == "上市外資" else column
+                ),
+                "regime_note": (
+                    "自營商自行買賣與避險細項自2014-12-01後使用"
+                    if "自營商" in column
+                    else "外資細項於2018年前後需檢查口徑" if "外資" in column
+                    else "無特定制度斷點註記"
+                ),
             })
     return pd.DataFrame(rows)
 
@@ -587,7 +631,9 @@ def run_phase2_study(raw: RawData, config: StudyConfig | None = None) -> Path:
     confirmatory.loc[
         confirmatory.get("model", pd.Series(dtype=str)).ne("group_uncontrolled")
     ].to_csv(output / "phase2_controlled_regressions.csv", index=False)
-    confirmatory.to_csv(output / "phase2_signal_comparison.csv", index=False)
+    _signal_comparison(distribution_results).to_csv(
+        output / "phase2_signal_comparison.csv", index=False
+    )
     nonlinear.to_csv(output / "phase2_nonlinear_results.csv", index=False)
     curve_data.to_csv(output / "phase2_nonlinear_curve_data.csv", index=False)
     group_results.loc[group_results.get("predictor", pd.Series(dtype=str)).str.contains("gross|directional_balance|net_intensity", regex=True, na=False)].to_csv(
