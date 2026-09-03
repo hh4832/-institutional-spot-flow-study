@@ -23,6 +23,13 @@ class StudyConfig:
     winsor_fraction: float = 0.01
     output_root: Path = Path("outputs")
     random_seed: int = 42
+    study_mode: str = "baseline"
+    phase2_normalization_windows: tuple[int, ...] = (504, 756)
+    phase2_return_horizons: tuple[int, ...] = (1, 5, 10)
+    phase2_min_group_n: int = 50
+    phase2_spline_df: int = 4
+    phase2_turnover_epsilon: float = 1.0
+    phase2_include_252_sensitivity: bool = True
 
     def to_dict(self) -> dict:
         result = asdict(self)
