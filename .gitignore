@@ -4,6 +4,7 @@ service_account.json
 credentials.json
 outputs/
 outputs_synthetic/
+outputs_synthetic_phase2/
 smoke_outputs/
 __pycache__/
 .pytest_cache/
