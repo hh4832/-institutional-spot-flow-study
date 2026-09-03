@@ -154,3 +154,160 @@ def add_normalizations(
                 (series - series.mean()) / std if std != 0 else np.nan
             )
     return pd.DataFrame(output, index=predictors.index)
+
+
+def build_phase2_activity_predictors(
+    buy: pd.DataFrame,
+    sell: pd.DataFrame,
+    official_net: pd.DataFrame,
+    turnover: pd.DataFrame,
+    windows: tuple[int, ...] = (1, 5, 10),
+) -> pd.DataFrame:
+    """Build Phase-2 levels that separate activity from direction.
+
+    ``gross`` measures two-sided activity, ``directional_balance`` measures
+    buy-versus-sell direction within institutional activity, and
+    ``net_intensity`` measures the absolute directional concentration.
+    """
+    reconstructed_buy = reconstruct_institution_flows(buy)
+    reconstructed_sell = reconstruct_institution_flows(sell)
+    reconstructed_net = reconstruct_institution_flows(official_net)
+    index = turnover.index
+    for frame in (reconstructed_buy, reconstructed_sell, reconstructed_net):
+        index = index.intersection(frame.index)
+    turnover = turnover.loc[index]
+    records: dict[str, pd.Series] = {}
+    for scope, institution in reconstructed_buy.columns:
+        buy_amount = reconstructed_buy.loc[index, (scope, institution)]
+        sell_amount = reconstructed_sell.loc[index, (scope, institution)]
+        net_amount = reconstructed_net.loc[index, (scope, institution)]
+        for window in windows:
+            buy_sum = buy_amount.rolling(window, min_periods=window).sum()
+            sell_sum = sell_amount.rolling(window, min_periods=window).sum()
+            net_sum = net_amount.rolling(window, min_periods=window).sum()
+            activity_sum = buy_sum + sell_sum
+            market_sum = turnover[scope].rolling(window, min_periods=window).sum()
+            prefix = f"{scope}__{institution}"
+            values = {
+                "buy": buy_sum.div(market_sum),
+                "sell": sell_sum.div(market_sum),
+                "net": net_sum.div(market_sum),
+                "gross": activity_sum.div(market_sum),
+                "directional_balance": net_sum.div(activity_sum),
+                "net_intensity": net_sum.abs().div(activity_sum),
+            }
+            for flow_type, series in values.items():
+                records[f"{prefix}__{flow_type}__{window}d"] = series.replace(
+                    [np.inf, -np.inf], np.nan
+                )
+    return pd.DataFrame(records, index=index)
+
+
+def build_nonoverlapping_changes(
+    predictors: pd.DataFrame,
+    flow_types: tuple[str, ...] = (
+        "buy",
+        "sell",
+        "net",
+        "gross",
+        "directional_balance",
+    ),
+) -> pd.DataFrame:
+    """Compare each k-day level with the preceding non-overlapping k-day block."""
+    records: dict[str, pd.Series] = {}
+    for column in predictors.columns:
+        parts = column.split("__")
+        if len(parts) != 4 or parts[2] not in flow_types:
+            continue
+        window = int(parts[3].removesuffix("d"))
+        name = f"{parts[0]}__{parts[1]}__{parts[2]}_change__{window}d"
+        records[name] = predictors[column] - predictors[column].shift(window)
+    return pd.DataFrame(records, index=predictors.index)
+
+
+def build_prior_market_controls(
+    close: pd.Series,
+    turnover: pd.DataFrame,
+    index: pd.Index,
+    epsilon: float = 1.0,
+) -> pd.DataFrame:
+    """Create d0-known return, volatility and non-overlapping turnover controls."""
+    close = pd.to_numeric(close, errors="coerce").reindex(index)
+    daily_return = close.pct_change(fill_method=None)
+    controls = pd.DataFrame(index=index)
+    for window in (1, 5, 10):
+        controls[f"prior_return_{window}d"] = close.div(close.shift(window)) - 1
+    controls["prior_volatility_10d"] = daily_return.rolling(10, min_periods=10).std()
+    controls["prior_volatility_20d"] = daily_return.rolling(20, min_periods=20).std()
+    for scope in ("listed", "otc", "combined"):
+        amount = pd.to_numeric(turnover[scope], errors="coerce").reindex(index)
+        for window in (5, 10):
+            current = amount.rolling(window, min_periods=window).sum()
+            previous = current.shift(window)
+            controls[f"{scope}__market_turnover_change_{window}d"] = np.log(
+                (current + epsilon) / (previous + epsilon)
+            ).replace([np.inf, -np.inf], np.nan)
+    return controls
+
+
+def build_turning_point_signals(
+    predictors: pd.DataFrame,
+    normalized: pd.DataFrame,
+    rolling_windows: tuple[int, ...],
+) -> pd.DataFrame:
+    """Build pre-specified direction and sell-pressure turning points."""
+    records: dict[str, pd.Series] = {}
+    for column in predictors.columns:
+        scope, institution, flow_type, window_label = column.split("__")
+        window = int(window_label.removesuffix("d"))
+        prefix = f"{scope}__{institution}"
+        if flow_type == "net":
+            previous = predictors[column].shift(window)
+            records[f"{prefix}__net_negative_to_positive__{window}d"] = (
+                previous.lt(0) & predictors[column].gt(0)
+            )
+            records[f"{prefix}__net_positive_to_negative__{window}d"] = (
+                previous.gt(0) & predictors[column].lt(0)
+            )
+        if flow_type == "sell":
+            one_day = f"{prefix}__sell__1d"
+            if window == 1 and one_day in predictors:
+                delta = predictors[one_day].diff()
+                records[f"{prefix}__sell_declining_3d__1d"] = delta.lt(0).rolling(3).sum().eq(3)
+                records[f"{prefix}__sell_declining_5d__1d"] = delta.lt(0).rolling(5).sum().eq(5)
+                records[f"{prefix}__sell_change_positive_to_negative__1d"] = (
+                    delta.shift(1).gt(0) & delta.lt(0)
+                )
+            for rolling_window in rolling_windows:
+                pr_name = f"{column}__rolling_{rolling_window}d_pr"
+                z_name = f"{column}__rolling_{rolling_window}d_z"
+                if pr_name in normalized:
+                    pr = normalized[pr_name]
+                    records[f"{prefix}__sell_pr80_to_40_60__{window}d__rolling_{rolling_window}d"] = (
+                        pr.shift(1).ge(80) & pr.between(40, 60, inclusive="both")
+                    )
+                    records[f"{prefix}__sell_pr80_to_lt40__{window}d__rolling_{rolling_window}d"] = (
+                        pr.shift(1).ge(80) & pr.lt(40)
+                    )
+                if z_name in normalized:
+                    z = normalized[z_name]
+                    records[f"{prefix}__sell_z1_5_to_lt0_5__{window}d__rolling_{rolling_window}d"] = (
+                        z.shift(1).ge(1.5) & z.lt(0.5)
+                    )
+        if flow_type == "buy" and window == 1:
+            delta = predictors[column].diff()
+            records[f"{prefix}__buy_rising_3d__1d"] = delta.gt(0).rolling(3).sum().eq(3)
+            records[f"{prefix}__buy_rising_5d__1d"] = delta.gt(0).rolling(5).sum().eq(5)
+            records[f"{prefix}__buy_change_negative_to_positive__1d"] = (
+                delta.shift(1).lt(0) & delta.gt(0)
+            )
+        if flow_type == "gross":
+            for rolling_window in rolling_windows:
+                pr_name = f"{column}__rolling_{rolling_window}d_pr"
+                if pr_name in normalized:
+                    pr = normalized[pr_name]
+                    records[f"{prefix}__gross_high_turn_down__{window}d__rolling_{rolling_window}d"] = (
+                        pr.shift(1).ge(80) & pr.lt(pr.shift(1))
+                    )
+    result = pd.DataFrame(records, index=predictors.index)
+    return result.astype("boolean")
