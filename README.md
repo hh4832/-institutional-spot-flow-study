@@ -79,3 +79,53 @@ Notebook 流程：GitHub clone／安全更新、安裝套件、測試、FinLab �
 1／5／10 日累積期間完成暖機；`common_window_start` 則固定由最長的
 756 日視窗下所有 Predictor 都完成暖機之日算起，
 用來避免不同視窗因樣本起點不同而產生不公平比較。
+
+## Phase 2：交易活動、轉折與機制驗證
+
+Phase 2 是獨立的精簡研究模式，不會重跑或覆蓋舊版完整 grid。主要分析
+756 日、以 504 日作穩健性驗證；252 日舊結果只作短期狀態比較。
+
+新增特徵：
+
+- `Gross = (Buy + Sell) / MarketTurnover`：法人雙邊交易活躍度。
+- `DirectionalBalance = (Buy - Sell) / (Buy + Sell)`：活動中的買賣方向。
+- `NetIntensity = abs(Buy - Sell) / (Buy + Sell)`：方向集中程度。
+- Buy／Sell／Net／Gross 的 1／5／10 日非重疊區間變化。
+- Net 正負轉換、Sell 連續下降、Buy 連續上升及高分位回落訊號。
+- d0 已知的 0050 前期 1／5／10 日報酬、10／20 日波動率及成交額變化。
+
+統計分析同時比較未控制與控制後 HAC 迴歸、分組平均、正報酬率、
+中心化二次項及固定自由度 cubic spline。Confirmatory 與 Exploratory
+假設分開進行 BH FDR；樣本數不足門檻的結果會在 FDR 前排除並另行輸出。
+
+### Phase 2 合成資料測試
+
+```bash
+python run_synthetic_phase2.py
+```
+
+### Phase 2 真實資料
+
+```bash
+python main.py --phase2
+```
+
+主要輸出位於新的時間戳記資料夾，包括：
+
+- `phase2_confirmatory_results.csv`
+- `phase2_controlled_regressions.csv`
+- `phase2_nonlinear_results.csv`
+- `phase2_gross_activity_results.csv`
+- `phase2_flow_change_results.csv`
+- `phase2_turning_point_results.csv`
+- `phase2_hit_rate_signals.csv`
+- `phase2_subperiod_results.csv`
+- `phase2_market_regime_results.csv`
+- `phase2_data_regime_audit.csv`
+- `phase2_reconstruction_discrepancies.csv`
+- `phase2_excluded_results.csv`
+- `phase2_summary.md`
+- `phase2_run_metadata.json`
+
+合成資料僅驗證計算流程，不可解讀為真實研究結果。真實資料仍須透過
+FinLab登入後執行。
