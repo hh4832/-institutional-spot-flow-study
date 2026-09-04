@@ -13,6 +13,10 @@ import pandas as pd
 def timestamped_output_directory(root: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output = Path(root) / stamp
+    suffix = 1
+    while output.exists():
+        output = Path(root) / f"{stamp}_{suffix:02d}"
+        suffix += 1
     (output / "figures").mkdir(parents=True, exist_ok=False)
     return output
 
