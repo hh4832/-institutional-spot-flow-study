@@ -7,6 +7,7 @@ outputs_synthetic/
 outputs_synthetic_phase2/
 smoke_outputs/
 __pycache__/
+.venv/
 .pytest_cache/
 .ipynb_checkpoints/
 *.pyc
