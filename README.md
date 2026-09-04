@@ -59,6 +59,9 @@ notebooks/institutional_spot_flow_study_colab.ipynb
 ```
 
 Notebook 流程：GitHub clone／安全更新、安裝套件、測試、FinLab 登入、執行研究、複製時間戳記輸出至 Google Drive。
+目前 Notebook 預設使用 `feature/phase2-flow-mechanism` 分支，並將新結果複製到
+`MyDrive/Quant_Research/institutional-spot-flow-study/phase2_outputs/<timestamp>`；
+若同名目的資料夾已存在會直接停止，不會覆寫。
 
 ## 重要限制
 
@@ -113,6 +116,7 @@ python main.py --phase2
 主要輸出位於新的時間戳記資料夾，包括：
 
 - `phase2_confirmatory_results.csv`
+- `phase2_sample_audit.csv`（逐一列出 predictor 暖機缺值、控制變數缺值及實際 complete-case 樣本）
 - `phase2_controlled_regressions.csv`
 - `phase2_nonlinear_results.csv`
 - `phase2_gross_activity_results.csv`
@@ -129,3 +133,8 @@ python main.py --phase2
 
 合成資料僅驗證計算流程，不可解讀為真實研究結果。真實資料仍須透過
 FinLab登入後執行。
+
+Phase 2 的分組分析會先排除 predictor 尚未完成滾動暖機的日期，再建立
+訊號組與非訊號組；缺值不會被視為 `False` 或納入非訊號組。每次執行都
+建立新的時間戳記資料夾；即使同一秒再次執行，也會自動加上流水號，
+不會覆蓋既有結果。
