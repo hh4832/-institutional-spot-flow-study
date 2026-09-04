@@ -92,6 +92,17 @@ def _controls_for_scope(controls: pd.DataFrame, scope: str) -> pd.DataFrame:
     ]].rename(columns={f"{scope}__market_turnover_change_10d": "market_turnover_change_10d"})
 
 
+def _membership_for_label(groups: pd.Series, label: str) -> pd.Series:
+    """Return a nullable membership flag without classifying unavailable values.
+
+    A direct ``groups.eq(label)`` turns missing rolling normalizations into
+    ``False``.  That incorrectly adds warm-up observations to the reference
+    group and can make longer rolling windows look artificially different.
+    """
+    membership = groups.eq(label).astype("boolean")
+    return membership.where(groups.notna(), pd.NA)
+
+
 def _candidate_memberships(
     normalized: pd.DataFrame,
     available_windows: tuple[int, ...],
@@ -126,7 +137,7 @@ def _candidate_memberships(
                     "requested_normalization_window": requested_window,
                     "group": label,
                     "horizon": horizon,
-                    "membership": groups.eq(label),
+                    "membership": _membership_for_label(groups, label),
                     "continuous": normalized[column],
                     "market_scope": predictor.split("__")[0],
                 })
@@ -157,7 +168,7 @@ def _confirmatory_results(
             })
         scope_controls = _controls_for_scope(controls, item["market_scope"])
         for signal_type, signal in (
-            ("group_dummy", item["membership"].astype(float)),
+            ("group_dummy", item["membership"].astype("Float64")),
             ("continuous", item["continuous"]),
         ):
             uncontrolled = hac_signal_regression(signal, outcome, lag)
@@ -272,7 +283,9 @@ def _group_feature_results(
         for horizon in horizons:
             outcome = returns[_return_column(horizon)]
             for label in labels:
-                summary = summarize_group(outcome, groups.eq(label), _hac_lag(horizon))
+                summary = summarize_group(
+                    outcome, _membership_for_label(groups, label), _hac_lag(horizon)
+                )
                 if summary:
                     rows.append({
                         "hypothesis_family": "exploratory_group",
@@ -350,6 +363,64 @@ def _temporal_breakdowns(candidates: list[dict], returns: pd.DataFrame) -> tuple
             periods_frame.loc[indices, "direction_flip_across_periods"] = unstable
             periods_frame.loc[indices, "single_period_dominated"] = dominated
     return periods_frame, pd.DataFrame(loo_rows)
+
+
+def _candidate_sample_audit(
+    candidates: list[dict], returns: pd.DataFrame, controls: pd.DataFrame
+) -> pd.DataFrame:
+    """Audit complete-case samples used by each confirmatory candidate."""
+    rows = []
+    for item in candidates:
+        outcome = returns[_return_column(item["horizon"])]
+        predictor = item["continuous"].replace([np.inf, -np.inf], np.nan)
+        membership = item["membership"]
+        scope_controls = _controls_for_scope(controls, item["market_scope"])
+        outcome_available = outcome.notna()
+        predictor_available = predictor.notna()
+        controls_available = scope_controls.notna().all(axis=1)
+        valid_uncontrolled = outcome_available & predictor_available
+        valid_controlled = valid_uncontrolled & controls_available
+
+        signal_uncontrolled = membership.loc[valid_uncontrolled].fillna(False).astype(bool)
+        signal_controlled = membership.loc[valid_controlled].fillna(False).astype(bool)
+        uncontrolled_n = int(valid_uncontrolled.sum())
+        controlled_n = int(valid_controlled.sum())
+        signal_uncontrolled_n = int(signal_uncontrolled.sum())
+        signal_controlled_n = int(signal_controlled.sum())
+        nongroup_uncontrolled_n = int((~signal_uncontrolled).sum())
+        nongroup_controlled_n = int((~signal_controlled).sum())
+        rows.append({
+            "candidate_id": item["candidate_id"],
+            "predictor": item["predictor"],
+            "normalization_type": item["normalization_type"],
+            "normalization_window": item["normalization_window"],
+            "requested_normalization_window": item["requested_normalization_window"],
+            "group": item["group"],
+            "return_type": f"O1_to_C{item['horizon']}",
+            "predictor_first_valid_date": predictor.first_valid_index(),
+            "predictor_last_valid_date": predictor.last_valid_index(),
+            "outcome_available_count": int(outcome_available.sum()),
+            "predictor_available_count": int(predictor_available.sum()),
+            "missing_predictor_excluded_uncontrolled": int(
+                (outcome_available & ~predictor_available).sum()
+            ),
+            "missing_controls_excluded_controlled": int(
+                (valid_uncontrolled & ~controls_available).sum()
+            ),
+            "uncontrolled_valid_count": uncontrolled_n,
+            "uncontrolled_signal_count": signal_uncontrolled_n,
+            "uncontrolled_nongroup_count": nongroup_uncontrolled_n,
+            "controlled_valid_count": controlled_n,
+            "controlled_signal_count": signal_controlled_n,
+            "controlled_nongroup_count": nongroup_controlled_n,
+            "uncontrolled_count_identity_ok": (
+                signal_uncontrolled_n + nongroup_uncontrolled_n == uncontrolled_n
+            ),
+            "controlled_count_identity_ok": (
+                signal_controlled_n + nongroup_controlled_n == controlled_n
+            ),
+        })
+    return pd.DataFrame(rows)
 
 
 def _signal_comparison(distribution_results: pd.DataFrame) -> pd.DataFrame:
@@ -506,7 +577,11 @@ def _mark_discrepancy_candidate_impact(
     for date in pd.to_datetime(result["date"]):
         ids = [
             item["candidate_id"] for item in candidates
-            if date in item["membership"].index and bool(item["membership"].loc[date])
+            if (
+                date in item["membership"].index
+                and pd.notna(item["membership"].loc[date])
+                and bool(item["membership"].loc[date])
+            )
         ]
         affected.append(";".join(ids))
     result["affected_candidate_ids"] = affected
@@ -578,6 +653,9 @@ def run_phase2_study(raw: RawData, config: StudyConfig | None = None) -> Path:
         horizons,
         include_252_sensitivity=config.phase2_include_252_sensitivity,
     )
+    sample_audit = _candidate_sample_audit(
+        candidates, returns_common, controls_common
+    )
     confirmatory_raw = _confirmatory_results(candidates, returns_common, controls_common)
     confirmatory, excluded_confirmatory = add_separate_fdr(
         confirmatory_raw, config.phase2_min_group_n
@@ -628,6 +706,7 @@ def run_phase2_study(raw: RawData, config: StudyConfig | None = None) -> Path:
     output = timestamped_output_directory(config.output_root)
     _feature_dictionary(list(features.columns)).to_csv(output / "phase2_feature_dictionary.csv", index=False)
     confirmatory.to_csv(output / "phase2_confirmatory_results.csv", index=False)
+    sample_audit.to_csv(output / "phase2_sample_audit.csv", index=False)
     confirmatory.loc[
         confirmatory.get("model", pd.Series(dtype=str)).ne("group_uncontrolled")
     ].to_csv(output / "phase2_controlled_regressions.csv", index=False)
@@ -664,6 +743,7 @@ def run_phase2_study(raw: RawData, config: StudyConfig | None = None) -> Path:
         "common_sample_start": str(common_start),
         "minimum_group_n_before_fdr": config.phase2_min_group_n,
         "confirmatory_hypotheses": len(candidates),
+        "complete_case_group_membership": True,
         "exploratory_search_restricted": True,
         "legacy_full_grid_executed": False,
         "price_dataset_names": raw.price_dataset_names,
