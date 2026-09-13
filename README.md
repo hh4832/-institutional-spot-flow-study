@@ -11,8 +11,7 @@
 - 主要正規化：只使用 d0 及以前資料的 252 日 rolling PR 與 Z-score。
 - Global PR/Z：標記為 `lookahead_descriptive_only`，不得解釋為歷史即時訊號。
 - 推論：Newey–West HAC；多日報酬使用 `maxlags=horizon-1`。
-- 價格：收盤使用 `etl:adj_close`；若 `etl:adj_open` 不存在，開盤使用
-  `原始開盤 × 還原收盤／原始收盤` 推導，以保持相同還原尺度。
+- 價格：開盤嚴格使用 `etl:adj_open`，收盤嚴格使用 `etl:adj_close`；任一 adjusted field 缺失即停止，不 fallback 到 raw price。
 
 ## 安裝
 

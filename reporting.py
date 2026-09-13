@@ -33,6 +33,15 @@ def _git_commit() -> str | None:
         return None
 
 
+def _git_branch() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "branch", "--show-current"], text=True, stderr=subprocess.DEVNULL
+        ).strip() or None
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+
+
 def build_manifest(config: dict, metadata: dict) -> dict:
     return {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -49,6 +58,7 @@ def build_manifest(config: dict, metadata: dict) -> dict:
             ]
         },
         "git_commit_hash": _git_commit(),
+        "git_branch": _git_branch(),
         "study_version": "0.1.0",
         "config": config,
         **metadata,

@@ -55,31 +55,6 @@ def _load_price_field(
     )
 
 
-def _load_derived_adjusted_open(
-    getter: Callable[[str], object],
-    ticker: str,
-    adjusted_close: pd.Series,
-) -> tuple[pd.Series, str]:
-    """Derive adjusted open with the close adjustment factor when needed."""
-    raw_open = _as_plain_dataframe(getter("price:開盤價"))
-    raw_close = _as_plain_dataframe(getter("price:收盤價"))
-    if ticker not in raw_open or ticker not in raw_close:
-        raise RuntimeError(f"原始開／收盤價資料找不到 {ticker}")
-    frame = pd.concat(
-        [
-            pd.to_numeric(raw_open[ticker], errors="coerce").rename("raw_open"),
-            pd.to_numeric(raw_close[ticker], errors="coerce").rename("raw_close"),
-            adjusted_close.rename("adjusted_close"),
-        ],
-        axis=1,
-    )
-    factor = frame["adjusted_close"].div(frame["raw_close"].replace(0, pd.NA))
-    adjusted_open = frame["raw_open"].mul(factor).rename("open")
-    if (adjusted_open.dropna() <= 0).any():
-        raise RuntimeError("推導的還原開盤價包含非正數")
-    return adjusted_open, "derived:price:開盤價*(etl:adj_close/price:收盤價)"
-
-
 def load_finlab_data(ticker: str = "0050", getter=None) -> RawData:
     if getter is None:
         from finlab import data
@@ -99,12 +74,7 @@ def load_finlab_data(ticker: str = "0050", getter=None) -> RawData:
         getter("institutional_investors_trading_all_market_summary:買賣超")
     )
     adjusted_close, close_name = _load_price_field(getter, ticker, "close")
-    try:
-        adjusted_open, open_name = _load_price_field(getter, ticker, "open")
-    except RuntimeError:
-        adjusted_open, open_name = _load_derived_adjusted_open(
-            getter, ticker, adjusted_close
-        )
+    adjusted_open, open_name = _load_price_field(getter, ticker, "open")
 
     return RawData(
         market_amount=market_amount,
