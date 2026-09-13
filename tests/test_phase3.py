@@ -3,11 +3,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from config import OTC_INDEX_DATASET, StudyConfig
 from phase3_pipeline import (
     PHASE3_CANDIDATE_SPECS,
     _hac_lag,
+    _relative_sensitivity_consistency,
     build_phase3_outcomes,
     run_phase3_study,
 )
@@ -47,6 +49,42 @@ def test_phase3_scope_is_fixed_and_has_no_forbidden_grid():
     assert all(spec[0].endswith(("__5d", "__10d")) for spec in PHASE3_CANDIDATE_SPECS)
     assert all("prior" not in spec[0].lower() for spec in PHASE3_CANDIDATE_SPECS)
     assert all("etf" not in spec[0].lower() for spec in PHASE3_CANDIDATE_SPECS)
+
+
+def _summary_result_rows(outcome_family: str, betas: tuple[float, ...]) -> pd.DataFrame:
+    horizons = (1, 5, 10, 20)
+    return pd.DataFrame({
+        "candidate_id": ["candidate_a"] * len(horizons),
+        "hypothesis_family": ["OTC foreign Buy"] * len(horizons),
+        "horizon": horizons,
+        "outcome_family": [outcome_family] * len(horizons),
+        "regression_beta": betas,
+    })
+
+
+def test_sensitivity_relative_outcome_is_unique_and_absolute_rows_are_excluded():
+    primary = _summary_result_rows("ROT_OTC_MINUS_0050", (0.01, 0.02, 0.03, -0.01))
+    sensitivity = pd.concat([
+        _summary_result_rows("OTC_PRICE", (-0.5, -0.5, -0.5, 0.5)),
+        _summary_result_rows("ROT_OTC_PRICE_MINUS_0050", (0.02, 0.01, 0.04, -0.02)),
+    ], ignore_index=True)
+    relative = sensitivity.loc[
+        sensitivity["outcome_family"].eq("ROT_OTC_PRICE_MINUS_0050")
+    ]
+    assert not relative.duplicated(["candidate_id", "horizon"]).any()
+    assert _relative_sensitivity_consistency(
+        primary, sensitivity, "OTC foreign Buy"
+    ) is True
+
+
+def test_duplicate_relative_sensitivity_fails_loudly():
+    primary = _summary_result_rows("ROT_OTC_MINUS_0050", (0.01, 0.02, 0.03, -0.01))
+    relative = _summary_result_rows(
+        "ROT_OTC_PRICE_MINUS_0050", (0.02, 0.01, 0.04, -0.02)
+    )
+    sensitivity = pd.concat([relative, relative.iloc[[0]]], ignore_index=True)
+    with pytest.raises(ValueError, match="price-index relative sensitivity.*not unique"):
+        _relative_sensitivity_consistency(primary, sensitivity, "OTC foreign Buy")
 
 
 def test_phase3_integration_outputs_and_metadata(tmp_path: Path):

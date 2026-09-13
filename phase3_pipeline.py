@@ -287,6 +287,47 @@ def _decision(group: pd.DataFrame, temporal: pd.DataFrame) -> str:
     return "淘汰"
 
 
+def _relative_sensitivity_consistency(
+    primary: pd.DataFrame,
+    sensitivity: pd.DataFrame,
+    hypothesis_family: str,
+) -> bool:
+    """Compare only like-for-like relative-rotation outcomes.
+
+    The key is candidate plus horizon.  Absolute OTC price-index rows are not
+    part of this comparison, and duplicate relative keys are a data error.
+    """
+    keys = ["candidate_id", "horizon"]
+    primary_relative = primary.loc[
+        primary["hypothesis_family"].eq(hypothesis_family)
+        & primary["outcome_family"].eq("ROT_OTC_MINUS_0050"),
+        keys + ["regression_beta"],
+    ].copy()
+    sensitivity_relative = sensitivity.loc[
+        sensitivity["hypothesis_family"].eq(hypothesis_family)
+        & sensitivity["outcome_family"].eq("ROT_OTC_PRICE_MINUS_0050"),
+        keys + ["regression_beta"],
+    ].copy()
+
+    for label, frame in (
+        ("primary total-return relative", primary_relative),
+        ("price-index relative sensitivity", sensitivity_relative),
+    ):
+        duplicates = frame.loc[frame.duplicated(keys, keep=False), keys]
+        if not duplicates.empty:
+            raise ValueError(
+                f"Phase 3 summary {label} comparison is not unique:\n"
+                f"{duplicates.to_string(index=False)}"
+            )
+
+    p = primary_relative.set_index(keys)["regression_beta"]
+    s = sensitivity_relative.set_index(keys)["regression_beta"]
+    shared = p.index.intersection(s.index)
+    if shared.empty:
+        return False
+    return bool((np.sign(p.loc[shared]) == np.sign(s.loc[shared])).all())
+
+
 def _write_summary(path: Path, results: pd.DataFrame, sensitivity: pd.DataFrame, temporal: pd.DataFrame) -> None:
     relative = results.loc[results["outcome_family"].eq("ROT_OTC_MINUS_0050")]
     classifications = _classifications(results.loc[results["horizon"].isin((5, 10, 20))])
@@ -303,10 +344,7 @@ def _write_summary(path: Path, results: pd.DataFrame, sensitivity: pd.DataFrame,
         lines.append(f"- **{family}**：{detail}")
     lines += ["", "## E. Total-return vs price-index sensitivity", ""]
     for family in ("OTC foreign Buy", "Listed foreign Net"):
-        p = relative.loc[relative["hypothesis_family"].eq(family)].set_index("horizon")["regression_beta"]
-        s = sensitivity.loc[sensitivity["hypothesis_family"].eq(family)].set_index("horizon")["regression_beta"]
-        shared = p.index.intersection(s.index)
-        consistent = bool((np.sign(p.loc[shared]) == np.sign(s.loc[shared])).all()) if len(shared) else False
+        consistent = _relative_sensitivity_consistency(results, sensitivity, family)
         lines.append(f"- {family}：方向{'一致' if consistent else '不完全一致'}。Primary inference 仍以 total-return index 為準。")
     lines += ["", "## F. Signal-family decisions", ""]
     decisions = []
