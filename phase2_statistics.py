@@ -53,6 +53,44 @@ def hac_signal_regression(
     }
 
 
+def hac_signal_prior_interaction(
+    signal: pd.Series,
+    returns: pd.Series,
+    prior_return: pd.Series,
+    maxlags: int,
+) -> dict:
+    """Estimate Return ~ Signal + Prior + Signal*Prior with HAC errors."""
+    frame = pd.concat(
+        [
+            signal.rename("signal"),
+            returns.rename("return"),
+            prior_return.rename("prior_return"),
+        ],
+        axis=1,
+    ).replace([np.inf, -np.inf], np.nan).dropna()
+    if len(frame) < 10 or frame["signal"].nunique() < 2:
+        return {}
+    frame["interaction"] = frame["signal"] * frame["prior_return"]
+    design = sm.add_constant(
+        frame[["signal", "prior_return", "interaction"]], has_constant="add"
+    )
+    result = _fit(frame["return"], design, maxlags)
+    return {
+        "observation_count": int(len(frame)),
+        "signal_beta": float(result.params["signal"]),
+        "prior_return_beta": float(result.params["prior_return"]),
+        "interaction_beta": float(result.params["interaction"]),
+        "signal_hac_se": float(result.bse["signal"]),
+        "prior_return_hac_se": float(result.bse["prior_return"]),
+        "interaction_hac_se": float(result.bse["interaction"]),
+        "signal_p": float(result.pvalues["signal"]),
+        "prior_return_p": float(result.pvalues["prior_return"]),
+        "interaction_p": float(result.pvalues["interaction"]),
+        "r_squared": float(result.rsquared),
+        "adjusted_r_squared": float(result.rsquared_adj),
+    }
+
+
 def nonlinear_hac_regressions(
     predictor: pd.Series,
     returns: pd.Series,

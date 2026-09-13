@@ -15,6 +15,40 @@
 - 推論：Newey–West HAC；多日報酬使用 `maxlags=horizon-1`。
 - 價格：開盤嚴格使用 `etl:adj_open`，收盤嚴格使用 `etl:adj_close`；任一 adjusted field 缺失即停止，不 fallback 到 raw price。
 
+## Phase 2.5：Prior Return Mechanism + Longer Forward Horizon
+
+Phase 2.5 是機制與穩健性延伸，回答：
+
+1. 法人現貨訊號控制0050先前5／20交易日報酬後是否仍存在？
+2. 法人訊號是否與prior return存在interaction？
+3. 既有訊號的效果是否由C1／C2／C3／C5／C10延續到C20？
+
+時間定義：法人訊號在d0收盤後完整可知，最早合理執行時間是下一交易日
+`etl:adj_open`（O1）；C20是自O1進場至第20個交易日`etl:adj_close`。
+prior return只使用不晚於d0的adjusted close交易列。C20的Newey–West HAC
+使用`maxlags=19`。
+
+```bash
+python main.py --phase25
+```
+
+不需要FinLab Token的合成資料驗證：
+
+```bash
+python run_synthetic_phase25.py
+```
+
+Colab請使用：
+
+```text
+notebooks/institutional_spot_flow_phase25_colab.ipynb
+```
+
+Phase 2.5維持法人累積窗口1／5／10日與既有252／504／756日normalization，
+不增加20日法人flow、不執行rotation study，也不覆蓋`phase2_*`輸出。
+
+> Phase 2.5 is a mechanism/robustness extension, not an untouched out-of-sample validation.
+
 ## 安裝
 
 ```bash

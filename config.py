@@ -30,6 +30,9 @@ class StudyConfig:
     phase2_spline_df: int = 4
     phase2_turnover_epsilon: float = 1.0
     phase2_include_252_sensitivity: bool = True
+    phase25_prior_return_windows: tuple[int, ...] = (5, 20)
+    phase25_return_horizons: tuple[int, ...] = (1, 2, 3, 5, 10, 20)
+    phase25_primary_mechanism_horizons: tuple[int, ...] = (5, 10, 20)
 
     def to_dict(self) -> dict:
         result = asdict(self)

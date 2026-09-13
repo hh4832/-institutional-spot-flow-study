@@ -4,6 +4,7 @@ import json
 import platform
 import subprocess
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -18,6 +19,22 @@ def timestamped_output_directory(root: Path) -> Path:
         output = Path(root) / f"{stamp}_{suffix:02d}"
         suffix += 1
     (output / "figures").mkdir(parents=True, exist_ok=False)
+    return output
+
+
+def timestamped_commit_output_directory(
+    root: Path, timezone_name: str = "Asia/Taipei"
+) -> Path:
+    """Create an immutable timestamp + git-commit output directory."""
+    commit = _git_commit() or "unknown"
+    stamp = datetime.now(ZoneInfo(timezone_name)).strftime("%Y%m%d_%H%M%S")
+    base = Path(root) / f"{stamp}_{commit[:8]}"
+    output = base
+    suffix = 1
+    while output.exists():
+        output = Path(f"{base}_{suffix}")
+        suffix += 1
+    output.mkdir(parents=True, exist_ok=False)
     return output
 
 

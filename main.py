@@ -7,6 +7,7 @@ from config import StudyConfig
 from data_loader import authenticate_finlab, load_finlab_data
 from pipeline import run_study
 from phase2_pipeline import run_phase2_study
+from phase25_pipeline import run_phase25_study
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,6 +18,11 @@ def parse_args() -> argparse.Namespace:
         "--browser-login",
         action="store_true",
         help="使用 FinLab 瀏覽器登入；預設安全輸入 API Token",
+    )
+    parser.add_argument(
+        "--phase25",
+        action="store_true",
+        help="執行 Phase 2.5 prior-return mechanism 與 C20 延伸",
     )
     parser.add_argument(
         "--phase2",
@@ -35,7 +41,11 @@ def main() -> None:
         token = getpass.getpass("請輸入 FinLab API Token：")
         authenticate_finlab(token)
     raw = load_finlab_data(ticker="0050")
-    if args.phase2:
+    if args.phase25:
+        output = run_phase25_study(
+            raw, StudyConfig(study_mode="phase25_prior_return_mechanism")
+        )
+    elif args.phase2:
         output = run_phase2_study(
             raw, StudyConfig(study_mode="phase2_flow_mechanism")
         )

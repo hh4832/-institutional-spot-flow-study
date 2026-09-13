@@ -59,3 +59,27 @@ def build_forward_returns(
         result.loc[signals, exit_date_column] = prices.index[exits].to_numpy()
 
     return result
+
+
+def build_prior_returns(
+    adjusted_close: pd.Series,
+    signal_index: pd.DatetimeIndex,
+    windows: tuple[int, ...] = (5, 20),
+) -> pd.DataFrame:
+    """Build d0-known returns using trading-row shifts only.
+
+    ``prior_ret_kd`` is C0 / C-k - 1.  No future value or fill is used.
+    """
+    close = pd.to_numeric(adjusted_close, errors="coerce").sort_index()
+    close = close.loc[~close.index.duplicated(keep="last")]
+    if (close.dropna() <= 0).any():
+        raise ValueError("0050 adjusted close 包含非正數")
+    result = pd.DataFrame(index=pd.DatetimeIndex(signal_index).sort_values())
+    for window in windows:
+        if window <= 0:
+            raise ValueError("prior return window 必須為正整數")
+        # Shift on the complete adjusted-price trading index first, then align
+        # to signal dates.  Missing signal dates must not change C-k.
+        full_prior = close.div(close.shift(window)) - 1
+        result[f"prior_ret_{window}d"] = full_prior.reindex(result.index)
+    return result
