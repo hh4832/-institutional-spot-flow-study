@@ -82,6 +82,15 @@ def make_synthetic_raw_data(periods: int = 420, seed: int = 42) -> RawData:
         1 + rng.normal(0, 0.003, periods)
     )
     open_price.name = "open"
+    otc_returns = rng.normal(0.00035, 0.013, periods)
+    otc_price = pd.Series(
+        200 * np.cumprod(1 + otc_returns), index=index, name="otc_price_index"
+    )
+    otc_total_return = pd.Series(
+        otc_price.to_numpy() * np.cumprod(np.full(periods, 1.00005)),
+        index=index,
+        name="otc_total_return_index",
+    )
     return RawData(
         market_amount=market,
         institutional_buy=buy,
@@ -93,4 +102,7 @@ def make_synthetic_raw_data(periods: int = 420, seed: int = 42) -> RawData:
             "open": "synthetic_adjusted_open",
             "close": "synthetic_adjusted_close",
         },
+        otc_total_return_index=otc_total_return,
+        otc_price_index=otc_price,
+        otc_index_dataset_name="stock_index_price:收盤指數",
     )

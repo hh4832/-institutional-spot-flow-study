@@ -8,11 +8,17 @@ from data_loader import authenticate_finlab, load_finlab_data
 from pipeline import run_study
 from phase2_pipeline import run_phase2_study
 from phase25_pipeline import run_phase25_study
+from phase3_pipeline import run_phase3_study
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="三大法人現貨買賣金額對0050未來報酬研究"
+    )
+    parser.add_argument(
+        "--phase3",
+        action="store_true",
+        help="執行 Phase 3 OTC 相對 0050 市場輪動機制研究",
     )
     parser.add_argument(
         "--browser-login",
@@ -40,8 +46,10 @@ def main() -> None:
     else:
         token = getpass.getpass("請輸入 FinLab API Token：")
         authenticate_finlab(token)
-    raw = load_finlab_data(ticker="0050")
-    if args.phase25:
+    raw = load_finlab_data(ticker="0050", include_otc_indices=args.phase3)
+    if args.phase3:
+        output = run_phase3_study(raw, StudyConfig(study_mode="phase3_rotation"))
+    elif args.phase25:
         output = run_phase25_study(
             raw, StudyConfig(study_mode="phase25_prior_return_mechanism")
         )

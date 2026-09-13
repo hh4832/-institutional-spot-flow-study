@@ -33,6 +33,8 @@ class StudyConfig:
     phase25_prior_return_windows: tuple[int, ...] = (5, 20)
     phase25_return_horizons: tuple[int, ...] = (1, 2, 3, 5, 10, 20)
     phase25_primary_mechanism_horizons: tuple[int, ...] = (5, 10, 20)
+    phase3_outcome_horizons: tuple[int, ...] = (1, 5, 10, 20)
+    phase3_primary_horizons: tuple[int, ...] = (5, 10, 20)
 
     def to_dict(self) -> dict:
         result = asdict(self)
@@ -83,3 +85,7 @@ PRICE_DATASET_CANDIDATES = {
     "open": ("etl:adj_open",),
     "close": ("etl:adj_close",),
 }
+
+OTC_INDEX_DATASET = "stock_index_price:收盤指數"
+OTC_TOTAL_RETURN_SERIES = "上櫃櫃買指數:報酬指數"
+OTC_PRICE_INDEX_SERIES = "上櫃櫃買指數:指數"

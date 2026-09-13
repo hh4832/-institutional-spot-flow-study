@@ -49,6 +49,25 @@ Phase 2.5維持法人累積窗口1／5／10日與既有252／504／756日normali
 
 > Phase 2.5 is a mechanism/robustness extension, not an untouched out-of-sample validation.
 
+## Phase 3：Market Rotation Mechanism Study
+
+Phase 3 固定使用 Phase 2／2.5 已預先指定的法人訊號，只將 outcome 改為
+0050、櫃買 total-return index，以及 `OTC − 0050` 的 C0→C1/C5/C10/C20
+相對報酬。Primary inference 使用 `上櫃櫃買指數:報酬指數`，
+`上櫃櫃買指數:指數` 只作 sensitivity。
+
+```bash
+python main.py --phase3
+python run_synthetic_phase3.py
+```
+
+Colab 使用 `notebooks/institutional_spot_flow_phase3_rotation_colab.ipynb`。
+
+> C0→Ck 以訊號日收盤為機制錨點；法人訊號在 C0 後才完整可知，因此
+> Phase 3 outcomes 明確標示 `tradable_outcome=false`，不是可交易進場報酬。
+> Phase 3 不新增 flow／normalization grid、prior-return model、ETF proxy 或
+> 人工 OTC open。
+
 ## 安裝
 
 ```bash
