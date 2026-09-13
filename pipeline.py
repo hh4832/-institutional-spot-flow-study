@@ -570,6 +570,12 @@ def run_study(raw: RawData, config: StudyConfig | None = None) -> Path:
     )
     _generate_primary_figures(normalized, group_results, output / "figures")
     metadata = {
+        "repository": "hh4832/-institutional-spot-flow-study",
+        "price_source_open": raw.price_dataset_names["open"],
+        "price_source_close": raw.price_dataset_names["close"],
+        "outcome_price_adjusted": raw.price_dataset_names == {"open": "etl:adj_open", "close": "etl:adj_close"},
+        "outcome_definition": "signal t; O1=adjusted_open[t+1]; Ck=adjusted_close[t+k] on trading-date rows",
+        "timezone": "Asia/Taipei",
         "data_start": str(analysis_dataset.index.min()),
         "data_end": str(analysis_dataset.index.max()),
         "price_dataset_names": raw.price_dataset_names,
